@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบคำนวณค่าทางด่วน & มอเตอร์เวย์ (ปรับแต่งพิกัดและเส้นทางจริง)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    body { font-family: 'Kanit', sans-serif; }
+    #map { height: 420px; width: 100%; border-radius: 1rem; z-index: 1; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen p-3 md:p-6">
+
+  <div class="max-w-6xl mx-auto space-y-6">
+    
+    <!-- Header -->
+    <header class="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col md:flex-row justify-between items-center gap-4 shadow-xl">
+      <div>
+        <h1 class="text-2xl font-bold text-white flex items-center gap-2">
+          <span>🛣️</span> ระบบคำนวณค่าทางด่วน & มอเตอร์เวย์ประเทศไทย
+        </h1>
+        <p class="text-xs text-slate-400 mt-1">แผนที่เส้นทางอัปเดตแนวโค้งตามถนนจริงและตำแหน่งด่านที่แม่นยำขึ้น</p>
+      </div>
+      <div class="flex items-center gap-2 bg-slate-950 p-2 rounded-xl border border-slate-800">
+        <label class="text-xs font-semibold px-2 text-slate-300">ประเภทยานพาหนะ:</label>
+        <select id="vehicleType" onchange="updateVehicleType()" class="bg-slate-900 text-white text-xs font-bold py-1.5 px-3 rounded-lg border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="4wheel">🚗 รถ 4 ล้อ</option>
+          <option value="6to10wheel">🚚 รถ 6–10 ล้อ</option>
+          <option value="over10wheel">🚛 รถ >10 ล้อ</option>
+        </select>
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- Left Column: Controls & Selector -->
+      <div class="lg:col-span-5 space-y-5">
+        
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+          <h2 class="text-base font-bold text-white border-b border-slate-800 pb-2 flex items-center justify-between">
+            <span>📍 เลือกสายทางด่วน / ด่าน</span>
+            <span id="routeTypeBadge" class="text-[10px] font-semibold bg-blue-900/60 text-blue-300 border border-blue-700/50 px-2.5 py-0.5 rounded-full">ระบบเหมาจ่าย</span>
+          </h2>
+
+          <!-- สายทางด่วน -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">เลือกสายทางพิเศษ/มอเตอร์เวย์</label>
+            <select id="expresswaySelect" onchange="onExpresswayChange()" class="w-full bg-slate-950 border border-slate-700 text-sm font-medium text-white rounded-xl p-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <!-- JS Populated -->
+            </select>
+          </div>
+
+          <!-- ทิศทางการเดินทาง -->
+          <div id="directionContainer" class="hidden bg-blue-950/40 p-3 rounded-xl border border-blue-900/50 space-y-1.5">
+            <label class="block text-xs font-semibold text-blue-200">ทิศทางการเดินทาง:</label>
+            <div class="grid grid-cols-2 gap-2">
+              <button type="button" id="dirOutbound" onclick="setDirection('outbound')" class="py-1.5 px-2 text-xs font-semibold rounded-lg border border-blue-500 bg-blue-600 text-white transition-all text-center">
+                🏙️ ขาออก (ไปต่างจังหวัด)
+              </button>
+              <button type="button" id="dirInbound" onclick="setDirection('inbound')" class="py-1.5 px-2 text-xs font-semibold rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 transition-all text-center">
+                🏢 ขากลับ (เข้าเมือง)
+              </button>
+            </div>
+          </div>
+
+          <!-- ด่านเก็บเงิน (Flat Rate) -->
+          <div id="flatGateContainer">
+            <label class="block text-xs font-semibold text-slate-300 mb-1">เลือกด่านเก็บเงิน</label>
+            <select id="flatGateSelect" onchange="onFlatGateChange()" class="w-full bg-slate-950 border border-slate-700 text-sm font-medium text-white rounded-xl p-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <!-- JS Populated -->
+            </select>
+          </div>
+
+          <!-- ด่านเก็บเงิน (Distance-based) -->
+          <div id="distanceGateContainer" class="hidden space-y-3">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex-1">
+                <label class="block text-xs font-semibold text-slate-300 mb-1">ด่านต้นทาง (ขึ้น)</label>
+                <select id="startGateSelect" onchange="calculateGateCost()" class="w-full bg-slate-950 border border-slate-700 text-sm font-medium text-white rounded-xl p-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <!-- JS Populated -->
+                </select>
+              </div>
+              <button type="button" onclick="swapGates()" title="สลับต้นทาง-ปลายทาง" class="mt-4 p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-300 transition-all">
+                🔄
+              </button>
+              <div class="flex-1">
+                <label class="block text-xs font-semibold text-slate-300 mb-1">ด่านปลายทาง (ลง)</label>
+                <select id="endGateSelect" onchange="calculateGateCost()" class="w-full bg-slate-950 border border-slate-700 text-sm font-medium text-white rounded-xl p-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <!-- JS Populated -->
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Price Display Box -->
+          <div class="bg-amber-950/30 border border-amber-800/50 rounded-xl p-4 text-center">
+            <p class="text-xs font-semibold text-amber-400 uppercase">ค่าผ่านทางด่านนี้/ช่วงนี้</p>
+            <p id="currentPrice" class="text-3xl font-black text-amber-500 my-0.5">50 <span class="text-sm font-normal text-amber-400">บาท</span></p>
+            <p id="currentDetail" class="text-xs text-amber-300/80">เหมาจ่ายต่อด่าน</p>
+          </div>
+
+          <button onclick="addToTrip()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
+            <span>➕</span> เพิ่มด่านนี้เข้าทริปเดินทาง
+          </button>
+        </div>
+
+        <!-- Trip Summary Box -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
+          <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+            <h3 class="text-base font-bold text-white">📋 สรุปทริปค่าทางด่วน</h3>
+            <button onclick="clearTrip()" class="text-xs text-red-400 hover:underline">ล้างทริปทั้งหมด</button>
+          </div>
+
+          <div id="tripList" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+            <p class="text-xs text-slate-500 text-center py-4">ยังไม่มีรายการทางด่วนในทริป</p>
+          </div>
+
+          <div class="bg-emerald-950/40 border border-emerald-800/50 rounded-xl p-4 flex justify-between items-center mt-3">
+            <div>
+              <p class="text-xs font-semibold text-emerald-300">ค่าทางด่วนรวมทั้งหมด</p>
+              <p class="text-xs text-emerald-400/80" id="tripItemCount">0 รายการ</p>
+            </div>
+            <p id="totalTripCost" class="text-2xl font-black text-emerald-400">0.00 <span class="text-xs font-normal text-emerald-300">บาท</span></p>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Column: Interactive Map -->
+      <div class="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl">
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="text-base font-bold text-white flex items-center gap-2">
+            <span>🗺️</span> แผนที่เส้นทางและตำแหน่งด่าน
+          </h2>
+          <span class="text-xs text-slate-400">คลิกหมุดดูรายละเอียดด่าน</span>
+        </div>
+        
+        <div id="map" class="flex-1 min-h-[420px] rounded-xl border border-slate-800"></div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script>
+    // --- DATABASE WITH REFINED CURVED PATHS & EXACT GATE COORDINATES ---
+    const expresswaysData = {
+      "chalerm_mahanakorn": {
+        name: "ทางพิเศษเฉลิมมหานคร (ขั้นที่ 1)",
+        type: "flat",
+        color: "#f97316",
+        center: [13.720, 100.540],
+        zoom: 12,
+        routeCoords: [
+          [13.6872, 100.4781], [13.6820, 100.5050], [13.7088, 100.5630],
+          [13.7121, 100.5824], [13.7225, 100.5471], [13.7385, 100.5524],
+          [13.7512, 100.5512], [13.7702, 100.5583]
+        ],
+        gates: [
+          { name: "ดินแดง / ดินแดง 1", lat: 13.7702, lng: 100.5583, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "เพชรบุรี", lat: 13.7512, lng: 100.5512, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "สุขุมวิท", lat: 13.7385, lng: 100.5524, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "พระราม 4 (1)", lat: 13.7225, lng: 100.5471, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "ท่าเรือ 1 / ท่าเรือ 2", lat: 13.7088, lng: 100.5630, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "อาจณรงค์ 1 (ไปบางนา)", lat: 13.7121, lng: 100.5824, price: { "4wheel": 25, "6to10wheel": 50, "over10wheel": 85 } },
+          { name: "สุขุมวิท 62", lat: 13.6925, lng: 100.6050, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "บางนา", lat: 13.6681, lng: 100.6035, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "ดาวคะนอง", lat: 13.6872, lng: 100.4781, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } }
+        ]
+      },
+      "srirat": {
+        name: "ทางพิเศษศรีรัช (ขั้นที่ 2)",
+        type: "flat",
+        color: "#22c55e",
+        center: [13.760, 100.530],
+        zoom: 12,
+        routeCoords: [
+          [13.7275, 100.5195], [13.7381, 100.5180], [13.7500, 100.5200],
+          [13.7588, 100.5215], [13.7780, 100.5420], [13.8000, 100.5380],
+          [13.8112, 100.5362], [13.8225, 100.5410], [13.7548, 100.5750], [13.7420, 100.6380]
+        ],
+        gates: [
+          { name: "รัชดาภิเษก", lat: 13.8225, lng: 100.5410, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "ประชาชื่น (ขาเข้า)", lat: 13.8112, lng: 100.5362, price: { "4wheel": 60, "6to10wheel": 90, "over10wheel": 140 } },
+          { name: "ประชาชื่น (ขาออก)", lat: 13.8115, lng: 100.5368, price: { "4wheel": 10, "6to10wheel": 15, "over10wheel": 30 } },
+          { name: "พหลโยธิน", lat: 13.7780, lng: 100.5420, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "ยมราช", lat: 13.7588, lng: 100.5215, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "หัวลำโพง", lat: 13.7381, lng: 100.5180, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "สุรวงศ์", lat: 13.7275, lng: 100.5195, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "อโศก 1 / อโศก 2", lat: 13.7532, lng: 100.5605, price: { "4wheel": 50, "6to10wheel": 75, "over10wheel": 110 } },
+          { name: "พระราม 9", lat: 13.7548, lng: 100.5750, price: { "4wheel": 25, "6to10wheel": 55, "over10wheel": 75 } },
+          { name: "ศรีนครินทร์", lat: 13.7420, lng: 100.6380, price: { "4wheel": 25, "6to10wheel": 55, "over10wheel": 75 } }
+        ]
+      },
+      "prajim_ratthaya": {
+        name: "ทางพิเศษประจิมรัถยา (ศรีรัช-วงแหวน)",
+        type: "flat",
+        color: "#a855f7",
+        center: [13.800, 100.460],
+        zoom: 12,
+        routeCoords: [
+          [13.7885, 100.4120], [13.7900, 100.4300], [13.7910, 100.4410],
+          [13.7895, 100.4620], [13.7950, 100.4850], [13.8012, 100.5015],
+          [13.8125, 100.5210], [13.8180, 100.5480]
+        ],
+        gates: [
+          { name: "ฉิมพลี", lat: 13.7885, lng: 100.4120, price: { "4wheel": 65, "6to10wheel": 105, "over10wheel": 150 } },
+          { name: "ตลิ่งชัน", lat: 13.7910, lng: 100.4410, price: { "4wheel": 65, "6to10wheel": 105, "over10wheel": 150 } },
+          { name: "บรมราชชนนี", lat: 13.7895, lng: 100.4620, price: { "4wheel": 65, "6to10wheel": 105, "over10wheel": 150 } },
+          { name: "บางพลัด", lat: 13.8012, lng: 100.5015, price: { "4wheel": 65, "6to10wheel": 105, "over10wheel": 150 } },
+          { name: "สะพานพระราม 7", lat: 13.8125, lng: 100.5210, price: { "4wheel": 65, "6to10wheel": 105, "over10wheel": 150 } },
+          { name: "กำแพงเพชร 2", lat: 13.8180, lng: 100.5480, price: { "4wheel": 65, "6to10wheel": 105, "over10wheel": 150 } }
+        ]
+      },
+      "chalong_rat": {
+        name: "ทางพิเศษฉลองรัช (รามอินทรา-อาจณรงค์)",
+        type: "flat",
+        color: "#d97706",
+        center: [13.820, 100.630],
+        zoom: 12,
+        routeCoords: [
+          [13.7150, 100.5890], [13.7350, 100.5900], [13.7580, 100.5920],
+          [13.7920, 100.6080], [13.8180, 100.6210], [13.8420, 100.6350],
+          [13.8710, 100.6520], [13.8920, 100.6720]
+        ],
+        gates: [
+          { name: "จตุโชติ", lat: 13.8920, lng: 100.6720, price: { "4wheel": 45, "6to10wheel": 65, "over10wheel": 90 } },
+          { name: "สุขาภิบาล 5-1", lat: 13.8710, lng: 100.6520, price: { "4wheel": 45, "6to10wheel": 65, "over10wheel": 90 } },
+          { name: "รามอินทรา", lat: 13.8420, lng: 100.6350, price: { "4wheel": 45, "6to10wheel": 65, "over10wheel": 90 } },
+          { name: "โยธินพัฒนา", lat: 13.8180, lng: 100.6210, price: { "4wheel": 45, "6to10wheel": 65, "over10wheel": 90 } },
+          { name: "ลาดพร้าว", lat: 13.7920, lng: 100.6080, price: { "4wheel": 45, "6to10wheel": 65, "over10wheel": 90 } },
+          { name: "พระราม 9-1", lat: 13.7580, lng: 100.5920, price: { "4wheel": 45, "6to10wheel": 65, "over10wheel": 90 } },
+          { name: "พระโขนง", lat: 13.7150, lng: 100.5890, price: { "4wheel": 45, "6to10wheel": 65, "over10wheel": 90 } }
+        ]
+      },
+      "kanchanaphisek": {
+        name: "ทางพิเศษกาญจนาภิเษก (บางพลี - สุขสวัสดิ์)",
+        type: "distance",
+        color: "#3b82f6",
+        center: [13.620, 100.550],
+        zoom: 11,
+        routeCoords: [
+          [13.6550, 100.4420], [13.6500, 100.4800], [13.6580, 100.5210],
+          [13.6420, 100.5580], [13.6350, 100.5920], [13.6280, 100.6250],
+          [13.6150, 100.6520], [13.6420, 100.6820]
+        ],
+        gates: [
+          { name: "ด่านบางขุนเทียน", lat: 13.6550, lng: 100.4420, distIndex: 0 },
+          { name: "ด่านสุขสวัสดิ์", lat: 13.6580, lng: 100.5210, distIndex: 1 },
+          { name: "ด่านบางครุ", lat: 13.6420, lng: 100.5580, distIndex: 2 },
+          { name: "ด่านสำโรงเหนือ", lat: 13.6350, lng: 100.5920, distIndex: 3 },
+          { name: "ด่านเทพารักษ์", lat: 13.6280, lng: 100.6250, distIndex: 4 },
+          { name: "ด่านบางเมือง", lat: 13.6150, lng: 100.6520, distIndex: 5 },
+          { name: "ด่านบางแก้ว", lat: 13.6420, lng: 100.6820, distIndex: 6 }
+        ],
+        distanceMatrix: {
+          "4wheel": [
+            [0,  15, 25, 35, 40, 45, 55],
+            [15, 0,  15, 25, 30, 35, 45],
+            [25, 15, 0,  15, 20, 25, 35],
+            [35, 25, 15, 0,  15, 20, 30],
+            [40, 30, 20, 15, 0,  15, 25],
+            [45, 35, 25, 20, 15, 0,  20],
+            [55, 45, 35, 30, 25, 20, 0]
+          ],
+          "6to10wheel": [
+            [0,  25, 45, 65, 75, 85,  105],
+            [25, 0,  25, 45, 55, 65,  85],
+            [45, 25, 0,  25, 35, 45,  65],
+            [65, 45, 25, 0,  25, 35,  55],
+            [75, 55, 35, 25, 0,  25,  45],
+            [85, 65, 45, 35, 25, 0,   35],
+            [105,85, 65, 55, 45, 35,  0]
+          ],
+          "over10wheel": [
+            [0,  35, 70, 100, 115, 130, 160],
+            [35, 0,  35, 65,  80,  95,  125],
+            [70, 35, 0,  35,  50,  65,  95],
+            [100,65, 35, 0,   30,  45,  75],
+            [115,80, 50, 30,  0,   30,  60],
+            [130,95, 65, 45,  30,  0,   45],
+            [160,125,95, 75,  60,  45,  0]
+          ]
+        }
+      },
+      "motorway_7": {
+        name: "มอเตอร์เวย์ สาย 7 (กรุงเทพฯ - พัทยา - มาบตาพุด)",
+        type: "distance",
+        color: "#06b6d4",
+        center: [13.300, 101.000],
+        zoom: 9,
+        routeCoords: [
+          [13.7180, 100.7580], [13.6800, 100.8200], [13.6210, 100.8920],
+          [13.5280, 101.0250], [13.4120, 101.0850], [13.1650, 100.9850],
+          [12.9650, 100.9480], [12.7210, 101.0520]
+        ],
+        gates: [
+          { name: "ด่านลาดกระบัง", lat: 13.7180, lng: 100.7580, distIndex: 0 },
+          { name: "ด่านบางบ่อ", lat: 13.6210, lng: 100.8920, distIndex: 1 },
+          { name: "ด่านบางปะกง", lat: 13.5280, lng: 101.0250, distIndex: 2 },
+          { name: "ด่านพนัสนิคม / บ้านบึง", lat: 13.4120, lng: 101.0850, distIndex: 3 },
+          { name: "ด่านบางพระ / หนองขาม", lat: 13.1650, lng: 100.9850, distIndex: 4 },
+          { name: "ด่านโป่ง (พัทยา)", lat: 12.9650, lng: 100.9480, distIndex: 5 },
+          { name: "ด่านอู่ตะเภา / มาบตาพุด", lat: 12.7210, lng: 101.0520, distIndex: 6 }
+        ],
+        distanceMatrix: {
+          "4wheel": [
+            [0, 25, 30, 55, 80, 105, 130],
+            [25, 0, 15, 35, 60, 85, 110],
+            [30, 15, 0, 25, 50, 75, 100],
+            [55, 35, 25, 0, 30, 55, 80],
+            [80, 60, 50, 30, 0, 25, 50],
+            [105, 85, 75, 55, 25, 0, 30],
+            [130, 110, 100, 80, 50, 30, 0]
+          ],
+          "6to10wheel": [
+            [0, 40, 50, 90, 130, 170, 210],
+            [40, 0, 25, 55, 95, 135, 175],
+            [50, 25, 0, 35, 75, 115, 155],
+            [90, 55, 35, 0, 45, 85, 125],
+            [130, 95, 75, 45, 0, 40, 80],
+            [170, 135, 115, 85, 40, 0, 45],
+            [210, 175, 155, 125, 80, 45, 0]
+          ],
+          "over10wheel": [
+            [0, 60, 70, 130, 190, 245, 305],
+            [60, 0, 35, 80, 140, 195, 255],
+            [70, 35, 0, 50, 110, 165, 225],
+            [130, 80, 50, 0, 65, 120, 180],
+            [190, 140, 110, 65, 0, 60, 120],
+            [245, 195, 165, 120, 60, 0, 60],
+            [305, 255, 225, 180, 120, 60, 0]
+          ]
+        }
+      },
+      "burapha_vithi": {
+        name: "ทางพิเศษบูรพาวิถี (บางนา - ชลบุรี)",
+        type: "distance",
+        color: "#ec4899",
+        center: [13.580, 100.800],
+        zoom: 10,
+        routeCoords: [
+          [13.6680, 100.6420], [13.6500, 100.6800], [13.6320, 100.7450],
+          [13.5820, 100.8250], [13.5420, 100.9120], [13.5120, 100.9820],
+          [13.4320, 101.0220]
+        ],
+        gates: [
+          { name: "ด่านบางนา / บางแก้ว", lat: 13.6680, lng: 100.6420, distIndex: 0 },
+          { name: "ด่านบางพลี / สุวรรณภูมิ", lat: 13.6320, lng: 100.7450, distIndex: 1 },
+          { name: "ด่านเมืองใหม่บางพลี / บางเสาธง", lat: 13.5820, lng: 100.8250, distIndex: 2 },
+          { name: "ด่านบางพลีน้อย", lat: 13.5420, lng: 100.9120, distIndex: 3 },
+          { name: "ด่านบางสมัคร", lat: 13.5120, lng: 100.9820, distIndex: 4 },
+          { name: "ด่านบางปะกง / ชลบุรี", lat: 13.4320, lng: 101.0220, distIndex: 5 }
+        ],
+        distanceMatrix: {
+          "4wheel": [
+            [0, 20, 35, 50, 55, 80],
+            [20, 0, 20, 35, 40, 65],
+            [35, 20, 0, 20, 25, 50],
+            [50, 35, 20, 0, 15, 35],
+            [55, 40, 25, 15, 0, 25],
+            [80, 65, 50, 35, 25, 0]
+          ],
+          "6to10wheel": [
+            [0, 45, 70, 100, 110, 165],
+            [45, 0, 40, 70, 80, 135],
+            [70, 40, 0, 40, 50, 105],
+            [100, 70, 40, 0, 25, 75],
+            [110, 80, 50, 25, 0, 55],
+            [165, 135, 105, 75, 55, 0]
+          ],
+          "over10wheel": [
+            [0, 70, 105, 150, 165, 245],
+            [70, 0, 60, 105, 120, 200],
+            [105, 60, 0, 60, 75, 155],
+            [150, 105, 60, 0, 35, 110],
+            [165, 120, 75, 35, 0, 80],
+            [245, 200, 155, 110, 80, 0]
+          ]
+        }
+      },
+      "don_muang_tollway": {
+        name: "ดอนเมืองโทลล์เวย์ (DMT)",
+        type: "flat",
+        color: "#ef4444",
+        center: [13.850, 100.560],
+        zoom: 11,
+        routeCoords: [
+          [13.8050, 100.5580], [13.8200, 100.5650], [13.8320, 100.5720],
+          [13.8700, 100.5850], [13.9120, 100.6020]
+        ],
+        gates: [
+          { name: "ด่านดินแดง / สุทธิสาร / ลาดพร้าว / บางเขน (ช่วงดินแดง-ดอนเมือง)", lat: 13.8050, lng: 100.5580, price: { "4wheel": 90, "6to10wheel": 120, "over10wheel": 120 } },
+          { name: "ด่านดอนเมือง / หลักสี่ (ช่วงดอนเมือง-อนุสรณ์สถาน)", lat: 13.9120, lng: 100.6020, price: { "4wheel": 40, "6to10wheel": 50, "over10wheel": 50 } },
+          { name: "จ่ายรวบตลอดสาย (ขาออกดินแดง / ขาเข้าดอนเมือง)", lat: 13.8320, lng: 100.5720, price: { "4wheel": 130, "6to10wheel": 170, "over10wheel": 170 } }
+        ]
+      }
+    };
+
+    // --- STATE VARIABLES ---
+    let map;
+    let markers = [];
+    let currentPolyline = null;
+    let currentVehicle = "4wheel";
+    let tripItems = [];
+    let currentDirection = "outbound";
+
+    // --- INITIALIZATION ---
+    window.onload = function() {
+      initMap();
+      populateExpresswaySelect();
+      onExpresswayChange();
+    };
+
+    function initMap() {
+      map = L.map('map').setView([13.7563, 100.5018], 10);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri',
+        maxZoom: 18
+      }).addTo(map);
+    }
+
+    function populateExpresswaySelect() {
+      const select = document.getElementById('expresswaySelect');
+      select.innerHTML = '';
+      for (const key in expresswaysData) {
+        const option = document.createElement('option');
+        option.value = key;
+        option.innerText = expresswaysData[key].name;
+        select.appendChild(option);
+      }
+    }
+
+    function onExpresswayChange() {
+      const selectedKey = document.getElementById('expresswaySelect').value;
+      const data = expresswaysData[selectedKey];
+
+      map.flyTo(data.center, data.zoom);
+      updateMapDisplay(data);
+
+      const directionContainer = document.getElementById('directionContainer');
+      const flatContainer = document.getElementById('flatGateContainer');
+      const distContainer = document.getElementById('distanceGateContainer');
+      const badge = document.getElementById('routeTypeBadge');
+
+      if (data.type === 'flat') {
+        badge.innerText = "ระบบเหมาจ่ายต่อด่าน";
+        directionContainer.classList.add('hidden');
+        flatContainer.classList.remove('hidden');
+        distContainer.classList.add('hidden');
+        populateFlatGates(data.gates);
+      } else {
+        badge.innerText = "ระบบคิดตามระยะทาง";
+        directionContainer.classList.remove('hidden');
+        flatContainer.classList.add('hidden');
+        distContainer.classList.remove('hidden');
+        populateDistanceGates(data.gates);
+      }
+    }
+
+    function setDirection(dir) {
+      currentDirection = dir;
+      const btnOut = document.getElementById('dirOutbound');
+      const btnIn = document.getElementById('dirInbound');
+
+      if (dir === 'outbound') {
+        btnOut.className = 'py-1.5 px-2 text-xs font-semibold rounded-lg border border-blue-500 bg-blue-600 text-white transition-all text-center';
+        btnIn.className = 'py-1.5 px-2 text-xs font-semibold rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 transition-all text-center';
+      } else {
+        btnIn.className = 'py-1.5 px-2 text-xs font-semibold rounded-lg border border-blue-500 bg-blue-600 text-white transition-all text-center';
+        btnOut.className = 'py-1.5 px-2 text-xs font-semibold rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 transition-all text-center';
+      }
+      swapGates();
+    }
+
+    function swapGates() {
+      const startSelect = document.getElementById('startGateSelect');
+      const endSelect = document.getElementById('endGateSelect');
+      const tempVal = startSelect.value;
+      startSelect.value = endSelect.value;
+      endSelect.value = tempVal;
+      calculateGateCost();
+    }
+
+    function populateFlatGates(gates) {
+      const select = document.getElementById('flatGateSelect');
+      select.innerHTML = '';
+      gates.forEach((gate, idx) => {
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.innerText = gate.name;
+        select.appendChild(opt);
+      });
+      onFlatGateChange();
+    }
+
+    function populateDistanceGates(gates) {
+      const startSelect = document.getElementById('startGateSelect');
+      const endSelect = document.getElementById('endGateSelect');
+      startSelect.innerHTML = '';
+      endSelect.innerHTML = '';
+
+      gates.forEach((gate) => {
+        const opt1 = document.createElement('option');
+        opt1.value = gate.distIndex;
+        opt1.innerText = gate.name;
+        startSelect.appendChild(opt1);
+
+        const opt2 = document.createElement('option');
+        opt2.value = gate.distIndex;
+        opt2.innerText = gate.name;
+        endSelect.appendChild(opt2);
+      });
+
+      startSelect.selectedIndex = 0;
+      endSelect.selectedIndex = gates.length - 1;
+      calculateGateCost();
+    }
+
+    function onFlatGateChange() {
+      const selectedKey = document.getElementById('expresswaySelect').value;
+      const data = expresswaysData[selectedKey];
+      const gateIdx = document.getElementById('flatGateSelect').value;
+      const gate = data.gates[gateIdx];
+      if (!gate) return;
+
+      const price = gate.price[currentVehicle];
+      document.getElementById('currentPrice').innerHTML = `${price} <span class="text-sm font-normal text-amber-400">บาท</span>`;
+      document.getElementById('currentDetail').innerText = `ด่าน ${gate.name} (เหมาจ่าย)`;
+    }
+
+    function calculateGateCost() {
+      const selectedKey = document.getElementById('expresswaySelect').value;
+      const data = expresswaysData[selectedKey];
+      if (data.type !== 'distance') return;
+
+      const startIdx = parseInt(document.getElementById('startGateSelect').value);
+      const endIdx = parseInt(document.getElementById('endGateSelect').value);
+      const cost = data.distanceMatrix[currentVehicle][startIdx][endIdx];
+
+      const startGateName = data.gates.find(g => g.distIndex === startIdx)?.name;
+      const endGateName = data.gates.find(g => g.distIndex === endIdx)?.name;
+
+      document.getElementById('currentPrice').innerHTML = `${cost} <span class="text-sm font-normal text-amber-400">บาท</span>`;
+      if (startIdx === endIdx) {
+        document.getElementById('currentDetail').innerText = `กรุณาเลือกด่านต้นทางและปลายทางให้ต่างกัน`;
+      } else {
+        const dirText = currentDirection === 'outbound' ? 'ขาออก' : 'ขากลับ';
+        document.getElementById('currentDetail').innerText = `${dirText}: ${startGateName} ➔ ${endGateName}`;
+      }
+    }
+
+    function updateVehicleType() {
+      currentVehicle = document.getElementById('vehicleType').value;
+      const selectedKey = document.getElementById('expresswaySelect').value;
+      const data = expresswaysData[selectedKey];
+      if (data.type === 'flat') onFlatGateChange();
+      else calculateGateCost();
+    }
+
+    function updateMapDisplay(data) {
+      markers.forEach(m => map.removeLayer(m));
+      markers = [];
+      if (currentPolyline) map.removeLayer(currentPolyline);
+
+      if (data.routeCoords && data.routeCoords.length > 0) {
+        currentPolyline = L.polyline(data.routeCoords, {
+          color: data.color || '#3b82f6',
+          weight: 5,
+          opacity: 0.8,
+          smoothFactor: 1.5
+        }).addTo(map);
+      }
+
+      data.gates.forEach(gate => {
+        const marker = L.marker([gate.lat, gate.lng]).addTo(map);
+        let popupContent = `<div class="font-sans text-xs p-1 text-slate-800">`;
+        popupContent += `<p class="text-sm font-bold">${gate.name}</p>`;
+        popupContent += `<p class="text-slate-500 my-0.5">${data.name}</p>`;
+        if (data.type === 'flat') {
+          popupContent += `<p class="text-emerald-600 font-bold">ราคา: ${gate.price[currentVehicle]} บาท</p>`;
+        }
+        popupContent += `</div>`;
+        marker.bindPopup(popupContent);
+        markers.push(marker);
+      });
+    }
+
+    // --- TRIP MANAGEMENT ---
+    function addToTrip() {
+      const selectedKey = document.getElementById('expresswaySelect').value;
+      const data = expresswaysData[selectedKey];
+      let itemTitle = "";
+      let cost = 0;
+
+      if (data.type === 'flat') {
+        const gateIdx = document.getElementById('flatGateSelect').value;
+        const gate = data.gates[gateIdx];
+        cost = gate.price[currentVehicle];
+        itemTitle = `${data.name} - ด่าน${gate.name}`;
+      } else {
+        const startIdx = parseInt(document.getElementById('startGateSelect').value);
+        const endIdx = parseInt(document.getElementById('endGateSelect').value);
+        if (startIdx === endIdx) {
+          alert("ด่านต้นทางและปลายทางต้องไม่เป็นด่านเดียวกันครับ");
+          return;
+        }
+        cost = data.distanceMatrix[currentVehicle][startIdx][endIdx];
+        const startGateName = data.gates.find(g => g.distIndex === startIdx)?.name;
+        const endGateName = data.gates.find(g => g.distIndex === endIdx)?.name;
+        const dirText = currentDirection === 'outbound' ? 'ขาออก' : 'ขากลับ';
+        itemTitle = `${data.name} (${dirText}): ${startGateName} ➔ ${endGateName}`;
+      }
+
+      tripItems.push({ id: Date.now(), title: itemTitle, cost: cost });
+      renderTrip();
+    }
+
+    function removeTripItem(id) {
+      tripItems = tripItems.filter(item => item.id !== id);
+      renderTrip();
+    }
+
+    function clearTrip() {
+      tripItems = [];
+      renderTrip();
+    }
+
+    function renderTrip() {
+      const tripList = document.getElementById('tripList');
+      if (tripItems.length === 0) {
+        tripList.innerHTML = `<p class="text-xs text-slate-500 text-center py-4">ยังไม่มีรายการทางด่วนในทริป</p>`;
+        document.getElementById('totalTripCost').innerHTML = `0.00 <span class="text-xs font-normal text-emerald-300">บาท</span>`;
+        document.getElementById('tripItemCount').innerText = `0 รายการ`;
+        return;
+      }
+
+      let html = '';
+      let total = 0;
+      tripItems.forEach((item, idx) => {
+        total += item.cost;
+        html += `
+          <div class="flex justify-between items-center bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-xs">
+            <div class="flex-1 pr-2">
+              <span class="font-semibold text-slate-200">${idx + 1}. ${item.title}</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="font-bold text-amber-400">${item.cost.toFixed(2)} ฿</span>
+              <button onclick="removeTripItem(${item.id})" class="text-slate-500 hover:text-red-400 font-bold">✕</button>
+            </div>
+          </div>
+        `;
+      });
+
+      tripList.innerHTML = html;
+      document.getElementById('totalTripCost').innerHTML = `${total.toLocaleString('th-TH', {minimumFractionDigits: 2})} <span class="text-xs font-normal text-emerald-300">บาท</span>`;
+      document.getElementById('tripItemCount').innerText = `${tripItems.length} รายการ`;
+    }
+  </script>
+
+</body>
+</html>
